@@ -1,0 +1,26 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f9fafb;
+}
+
+/* 
+ * Targeted fix for HTML emails:
+ * Tailwind's preflight applies `height: auto` to images and `border-collapse: collapse` to tables,
+ * which overrides presentation attributes (e.g., height="40" on Google's logo).
+ * We revert these inside the email viewer so native HTML attributes work again.
+ */
+.email-content img {
+  height: revert;
+  max-width: none;
+}
+.email-content table {
+  border-collapse: revert;
+}

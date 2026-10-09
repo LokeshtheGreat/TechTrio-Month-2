@@ -1,0 +1,22 @@
+# Secrets and credentials
+
+**/.env
+**/credentials.json
+**/token.json
+
+# Python
+
+**/**pycache**/
+*.py[cod]
+**/.venv/
+**/venv/
+
+# Frontend
+
+**/node_modules/
+**/dist/
+
+# OS files
+
+.DS_Store
+Thumbs.db
