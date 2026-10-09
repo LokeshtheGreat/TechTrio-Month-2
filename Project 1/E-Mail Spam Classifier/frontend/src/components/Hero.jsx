@@ -9,7 +9,7 @@ export default function Hero({ setActiveTab }) {
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const res = await axios.get('http://localhost:5000/api/gmail/status');
+        const res = await axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/gmail/status`);
         setConnected(res.data.connected);
         if (res.data.connected) {
           setUserEmail(res.data.email);

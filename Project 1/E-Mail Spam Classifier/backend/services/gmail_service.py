@@ -36,42 +36,32 @@ class GmailService:
     def is_connected(self):
         return self.creds is not None and self.creds.valid
 
+    def _get_flow(self, redirect_uri):
+        creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+        if creds_json:
+            import json
+            client_config = json.loads(creds_json)
+            return Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=redirect_uri)
+        else:
+            if not os.path.exists(self.credentials_path):
+                raise Exception("credentials.json not found and GOOGLE_CREDENTIALS_JSON env var is missing.")
+            return Flow.from_client_secrets_file(self.credentials_path, scopes=SCOPES, redirect_uri=redirect_uri)
+
     def get_auth_url(self, redirect_uri):
-        if not os.path.exists(self.credentials_path):
-            raise Exception("credentials.json not found. Please add it to the backend folder.")
-            
         try:
-            flow = Flow.from_client_secrets_file(
-                self.credentials_path,
-                scopes=SCOPES,
-                redirect_uri=redirect_uri
-            )
+            flow = self._get_flow(redirect_uri)
         except ValueError as e:
-            raise Exception(f"Failed to parse credentials.json: {str(e)}. Ensure the file contains valid JSON.")
+            raise Exception(f"Failed to parse credentials: {str(e)}")
             
         auth_url, state = flow.authorization_url(prompt='consent', access_type='offline')
+        code_verifier = getattr(flow, 'code_verifier', None)
+        return auth_url, state, code_verifier
         
-        # Save code_verifier mapped by state for PKCE validation
-        if not hasattr(self, '_oauth_states'):
-            self._oauth_states = {}
-        self._oauth_states[state] = getattr(flow, 'code_verifier', None)
-        
-        return auth_url, state
-        
-    def exchange_code(self, code, redirect_uri, state=None):
+    def exchange_code(self, code, redirect_uri, state=None, code_verifier=None):
         try:
-            flow = Flow.from_client_secrets_file(
-                self.credentials_path,
-                scopes=SCOPES,
-                redirect_uri=redirect_uri
-            )
+            flow = self._get_flow(redirect_uri)
         except ValueError as e:
-            raise Exception(f"Failed to parse credentials.json: {str(e)}. Ensure the file contains valid JSON.")
-        
-        # Retrieve the code_verifier we saved for this state
-        code_verifier = None
-        if state and hasattr(self, '_oauth_states'):
-            code_verifier = self._oauth_states.pop(state, None)
+            raise Exception(f"Failed to parse credentials: {str(e)}")
             
         if code_verifier:
             flow.fetch_token(code=code, code_verifier=code_verifier)
