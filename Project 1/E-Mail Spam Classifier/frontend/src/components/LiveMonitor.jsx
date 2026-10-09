@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import API_BASE_URL from '../../api.js';
+import API_BASE_URL from '../api.js';
 import DOMPurify from 'dompurify';
 import { Mail, AlertCircle, CheckCircle2, RefreshCw, X, ShieldAlert, ShieldCheck } from 'lucide-react';
 
