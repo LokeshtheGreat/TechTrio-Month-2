@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, Activity, Mail, CheckCircle2, AlertCircle } from 'lucide-react';
 import axios from 'axios';
+import API_BASE_URL from '../../api.js';
 
 export default function Hero({ setActiveTab }) {
   const [connected, setConnected] = useState(false);
@@ -9,7 +10,7 @@ export default function Hero({ setActiveTab }) {
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const res = await axios.get('http://localhost:5000/api/gmail/status');
+        const res = await axios.get(`${API_BASE_URL}${p}`);
         setConnected(res.data.connected);
         if (res.data.connected) {
           setUserEmail(res.data.email);
