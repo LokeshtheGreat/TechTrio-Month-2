@@ -17,7 +17,7 @@ export default function TestMessage() {
     setResult(null);
 
     try {
-      const res = await axios.post(`${API_BASE_URL}${p}`, { message });
+      const res = await axios.post(`${API_BASE_URL}/api/predict`, { message });
       setResult(res.data);
     } catch (err) {
       setError('Failed to analyze message. Ensure the backend is running.');
