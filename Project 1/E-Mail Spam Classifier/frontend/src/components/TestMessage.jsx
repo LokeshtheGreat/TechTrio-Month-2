@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import API_BASE_URL from '../../api.js';
+import API_BASE_URL from '../api.js';
 import { Send, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
 
 export default function TestMessage() {
