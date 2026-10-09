@@ -7,7 +7,7 @@ export default function Analytics() {
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
-    axios.get(`${API_BASE_URL}${p}`)
+    axios.get(`${API_BASE_URL}/api/stats`)
       .then(res => setStats(res.data))
       .catch(err => console.error(err));
   }, []);
