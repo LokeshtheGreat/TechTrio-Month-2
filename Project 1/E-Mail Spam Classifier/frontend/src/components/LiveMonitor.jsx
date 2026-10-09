@@ -35,7 +35,7 @@ export default function LiveMonitor() {
     if (monitoring) {
       interval = setInterval(async () => {
         try {
-          const res = await axios.get(`${API_BASE_URL}${p}`);
+          const res = await axios.get(`${API_BASE_URL}/api/gmail/latest`);
           if (res.data.emails) {
             setEmails(res.data.emails);
           }
@@ -64,7 +64,7 @@ export default function LiveMonitor() {
 
   const checkStatus = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}${p}`);
+      const res = await axios.get(`${API_BASE_URL}/api/gmail/status`);
       setConnected(res.data.connected);
       if (res.data.connected) {
         setUserEmail(res.data.email);
@@ -79,12 +79,12 @@ export default function LiveMonitor() {
   };
 
   const handleConnect = () => {
-    window.location.href = `${API_BASE_URL}${p}`;
+    window.location.href = `${API_BASE_URL}/api/gmail/connect`;
   };
 
   const handleDisconnect = async () => {
     try {
-      await axios.post(`${API_BASE_URL}${p}`);
+      await axios.post(`${API_BASE_URL}/api/gmail/disconnect`);
       setConnected(false);
       setUserEmail('');
       setEmails([]);
@@ -96,7 +96,7 @@ export default function LiveMonitor() {
   
   const handleStartWatch = async () => {
     try {
-      await axios.post(`${API_BASE_URL}${p}`);
+      await axios.post(`${API_BASE_URL}/api/gmail/watch`);
       setMonitoring(true);
     } catch(err) {
       setError('Failed to start monitoring');
@@ -106,7 +106,7 @@ export default function LiveMonitor() {
   
   const handleRenewWatch = async () => {
     try {
-      const res = await axios.post(`${API_BASE_URL}${p}`);
+      const res = await axios.post(`${API_BASE_URL}/api/gmail/renew-watch`);
       setExpiration(res.data.expiration);
       setRenewalStatus('active');
     } catch(err) {
@@ -116,7 +116,7 @@ export default function LiveMonitor() {
 
   const handleStopWatch = async () => {
     try {
-      await axios.post(`${API_BASE_URL}${p}`);
+      await axios.post(`${API_BASE_URL}/api/gmail/stop-watch`);
       setMonitoring(false);
     } catch(err) {
       setError('Failed to stop monitoring');
@@ -127,7 +127,7 @@ export default function LiveMonitor() {
     setSyncing(true);
     setError('');
     try {
-      const res = await axios.post(`${API_BASE_URL}${p}`);
+      const res = await axios.post(`${API_BASE_URL}/api/gmail/sync`);
       setEmails(res.data.emails || []);
     } catch (err) {
       console.error(err);
