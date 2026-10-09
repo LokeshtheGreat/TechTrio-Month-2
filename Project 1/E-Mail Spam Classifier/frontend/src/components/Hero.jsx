@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, Activity, Mail, CheckCircle2, AlertCircle } from 'lucide-react';
 import axios from 'axios';
-import API_BASE_URL from '../../api.js';
+import API_BASE_URL from '../api.js';
 
 export default function Hero({ setActiveTab }) {
   const [connected, setConnected] = useState(false);
