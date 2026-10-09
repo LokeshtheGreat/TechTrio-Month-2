@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import API_BASE_URL from '../../api.js';
 import { Send, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
 
 export default function TestMessage() {
@@ -16,7 +17,7 @@ export default function TestMessage() {
     setResult(null);
 
     try {
-      const res = await axios.post('http://localhost:5000/api/predict', { message });
+      const res = await axios.post(`${API_BASE_URL}${p}`, { message });
       setResult(res.data);
     } catch (err) {
       setError('Failed to analyze message. Ensure the backend is running.');
