@@ -1,21 +1,32 @@
-# Virtual Environment
+# Virtual Environments
 venv/
+.venv/
 env/
-.env
 
-# Google API Credentials
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# Google API Credentials & Tokens
 credentials.json
 client_secret.json
 token.json
 *.token
 
-# Python Cache
+# Python Cache & Testing
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
 
-# Node Modules
+# Node Modules & Builds
 node_modules/
+dist/
 
-# Mac OS
+# OS Files
 .DS_Store
+Thumbs.db

@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import DOMPurify from 'dompurify';
-import { Mail, AlertCircle, CheckCircle2, RefreshCw, X, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Mail, AlertCircle, CheckCircle2, RefreshCw, X, ShieldAlert, ShieldCheck, Lock, LogIn, User } from 'lucide-react';
+import { getBackendUrl, getAuthHeaders, getAuthToken, initiateGmailConnect, fetchGmailStatus } from '../config/api';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function LiveMonitor() {
+  const { user, loading: authLoading, openAuthModal } = useAuth();
   const [connected, setConnected] = useState(false);
   const [userEmail, setUserEmail] = useState('');
   const [emails, setEmails] = useState([]);
   const [statusLoading, setStatusLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [selectedEmail, setSelectedEmail] = useState(null);
@@ -26,17 +30,35 @@ export default function LiveMonitor() {
   }, [selectedEmail?.id]);
 
   useEffect(() => {
-    checkStatus();
-  }, []);
+    if (authLoading) {
+      setStatusLoading(true);
+      return;
+    }
+
+    if (user) {
+      checkStatus();
+    } else {
+      setConnected(false);
+      setUserEmail('');
+      setEmails([]);
+      setStatusLoading(false);
+    }
+  }, [user, authLoading]);
 
   useEffect(() => {
     let interval;
     if (monitoring) {
       interval = setInterval(async () => {
         try {
-          const res = await axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/gmail/latest`);
+          const headers = await getAuthHeaders();
+          const res = await axios.get(`${getBackendUrl()}/api/gmail/latest`, { headers });
           if (res.data.emails) {
             setEmails(res.data.emails);
+            setSelectedEmail(prev => {
+              if (!prev) return null;
+              const found = res.data.emails.find(e => e.id === prev.id);
+              return found || prev;
+            });
           }
           if (res.data.monitoring !== undefined) {
             setMonitoring(res.data.monitoring);
@@ -55,35 +77,88 @@ export default function LiveMonitor() {
         }
       }, 5000);
     }
-  return () => {
+    return () => {
       if (interval) clearInterval(interval);
     };
   }, [monitoring]);
 
 
   const checkStatus = async () => {
+    if (authLoading || !user) {
+      setConnected(false);
+      setStatusLoading(false);
+      return;
+    }
+
+    setError('');
+    setStatusLoading(true);
     try {
-      const res = await axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/gmail/status`);
-      setConnected(res.data.connected);
-      if (res.data.connected) {
-        setUserEmail(res.data.email);
-        handleSync(); // Auto sync on load if connected
+      const data = await fetchGmailStatus();
+      if (data.unauthenticated) {
+        setConnected(false);
+        return;
+      }
+      setConnected(Boolean(data.connected));
+      if (data.connected) {
+        setUserEmail(data.email || '');
+        // Load latest emails from database first without triggering a full Gmail sync
+        try {
+          const headers = await getAuthHeaders();
+          const res = await axios.get(`${getBackendUrl()}/api/gmail/latest`, { headers });
+          if (res.data.emails && res.data.emails.length > 0) {
+            setEmails(res.data.emails);
+            if (res.data.monitoring !== undefined) setMonitoring(res.data.monitoring);
+            if (res.data.expiration !== undefined) setExpiration(res.data.expiration);
+            if (res.data.renewal_status !== undefined) setRenewalStatus(res.data.renewal_status);
+            if (res.data.current_time !== undefined) setServerTime(res.data.current_time);
+          } else {
+            // First time load: no emails in database yet, perform initial sync
+            handleSync();
+          }
+        } catch (fetchErr) {
+          console.error('Initial latest fetch error:', fetchErr);
+          handleSync();
+        }
       }
     } catch (err) {
-      console.error(err);
-      setError('Unable to check Gmail connection status.');
+      console.error('Status check error:', err);
+      if (err.response?.status !== 401) {
+        setError('Unable to check Gmail connection status. Please ensure the backend is running.');
+      } else {
+        setConnected(false);
+      }
     } finally {
       setStatusLoading(false);
     }
   };
 
-  const handleConnect = () => {
-    window.location.href = `${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/gmail/connect`;
+  const handleConnect = async () => {
+    setError('');
+    setConnecting(true);
+    try {
+      const authUrl = await initiateGmailConnect();
+      if (authUrl) {
+        window.location.href = authUrl;
+        return;
+      }
+      setError('Unable to obtain Google authorization URL from server.');
+    } catch (err) {
+      console.error('Gmail connect failed:', err);
+      if (err.response?.status === 401) {
+        setError('You are not signed in or your session has expired. Please sign in again.');
+      } else {
+        const errorMsg = err.response?.data?.error || err.message || 'Failed to initiate Gmail connection.';
+        setError(errorMsg);
+      }
+    } finally {
+      setConnecting(false);
+    }
   };
 
   const handleDisconnect = async () => {
     try {
-      await axios.post(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/gmail/disconnect`);
+      const headers = await getAuthHeaders();
+      await axios.post(`${getBackendUrl()}/api/gmail/disconnect`, {}, { headers });
       setConnected(false);
       setUserEmail('');
       setEmails([]);
@@ -95,7 +170,8 @@ export default function LiveMonitor() {
   
   const handleStartWatch = async () => {
     try {
-      await axios.post(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/gmail/watch`);
+      const headers = await getAuthHeaders();
+      await axios.post(`${getBackendUrl()}/api/gmail/watch`, {}, { headers });
       setMonitoring(true);
     } catch(err) {
       setError('Failed to start monitoring');
@@ -105,7 +181,8 @@ export default function LiveMonitor() {
   
   const handleRenewWatch = async () => {
     try {
-      const res = await axios.post(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/gmail/renew-watch`);
+      const headers = await getAuthHeaders();
+      const res = await axios.post(`${getBackendUrl()}/api/gmail/renew-watch`, {}, { headers });
       setExpiration(res.data.expiration);
       setRenewalStatus('active');
     } catch(err) {
@@ -115,7 +192,8 @@ export default function LiveMonitor() {
 
   const handleStopWatch = async () => {
     try {
-      await axios.post(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/gmail/stop-watch`);
+      const headers = await getAuthHeaders();
+      await axios.post(`${getBackendUrl()}/api/gmail/stop-watch`, {}, { headers });
       setMonitoring(false);
     } catch(err) {
       setError('Failed to stop monitoring');
@@ -126,7 +204,8 @@ export default function LiveMonitor() {
     setSyncing(true);
     setError('');
     try {
-      const res = await axios.post(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/gmail/sync`);
+      const headers = await getAuthHeaders();
+      const res = await axios.post(`${getBackendUrl()}/api/gmail/sync`, {}, { headers });
       setEmails(res.data.emails || []);
     } catch (err) {
       console.error(err);
@@ -136,29 +215,84 @@ export default function LiveMonitor() {
     }
   };
 
-  if (statusLoading) {
-    return <div className="p-8 text-center text-gray-500">Checking connection...</div>;
+  if (authLoading || statusLoading) {
+    return (
+      <div className="p-12 text-center text-gray-500 flex flex-col items-center justify-center gap-3">
+        <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
+        <span className="text-sm font-medium">Checking connection & restoring session...</span>
+      </div>
+    );
   }
 
-  if (!connected) {
-  return (
+  if (!user) {
+    return (
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Live Monitor</h2>
           <p className="text-gray-500">Connect your Gmail account to enable Live Monitoring.</p>
         </div>
-        <div className="bg-white rounded-xl p-10 shadow-sm border border-gray-200 text-center">
-          <Mail className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-gray-900 mb-2">Gmail is not connected.</h3>
-          <p className="text-gray-500 mb-6">Authorize this application to read your recent emails and classify them.</p>
-          <button 
-            onClick={handleConnect}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-          >
-            Connect Gmail
-          </button>
+        <div className="bg-white rounded-xl p-10 shadow-sm border border-gray-200 text-center max-w-2xl mx-auto">
+          <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">Sign In Required</h3>
+          <p className="text-gray-600 mb-6 max-w-md mx-auto text-sm leading-relaxed">
+            Please sign in to your Spam Shield account before connecting Gmail. Each user's Gmail connection and classified messages are securely encrypted and isolated to their account.
+          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <button 
+              onClick={openAuthModal}
+              className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm shadow-sm"
+            >
+              <LogIn className="w-4 h-4" />
+              Sign In to Connect Gmail
+            </button>
+          </div>
         </div>
-        {error && <div className="text-red-500 text-center">{error}</div>}
+      </div>
+    );
+  }
+
+  if (!connected) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Live Monitor</h2>
+          <p className="text-gray-500">Connect your Gmail account to enable Live Monitoring.</p>
+        </div>
+        <div className="bg-white rounded-xl p-10 shadow-sm border border-gray-200 text-center max-w-2xl mx-auto">
+          <Mail className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-xl font-bold text-gray-900 mb-2">Gmail is not connected</h3>
+          <p className="text-gray-500 mb-4 text-sm">
+            Authorize this application to read your recent emails and classify them for spam in real time.
+          </p>
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-full text-xs font-medium mb-6">
+            <User className="w-3.5 h-3.5" />
+            Signed in as: <span className="font-semibold">{user.email}</span>
+          </div>
+          <div>
+            <button 
+              onClick={handleConnect}
+              disabled={connecting}
+              className={`px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 mx-auto ${connecting ? 'opacity-70 cursor-not-allowed' : ''}`}
+            >
+              {connecting ? (
+                <>
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                'Connect Gmail'
+              )}
+            </button>
+          </div>
+        </div>
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex items-center justify-center gap-2 max-w-lg mx-auto">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 text-red-500" />
+            <span>{error}</span>
+          </div>
+        )}
       </div>
     );
   }
