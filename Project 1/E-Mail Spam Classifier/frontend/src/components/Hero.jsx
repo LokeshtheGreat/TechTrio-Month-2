@@ -1,26 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, Activity, Mail, CheckCircle2, AlertCircle } from 'lucide-react';
-import axios from 'axios';
-import API_BASE_URL from '../api.js';
+import { fetchGmailStatus } from '../config/api';
+import { useAuth } from '../context/AuthContext';
 
 export default function Hero({ setActiveTab }) {
+  const { user, loading: authLoading } = useAuth();
   const [connected, setConnected] = useState(false);
   const [userEmail, setUserEmail] = useState('');
 
   useEffect(() => {
-    const checkStatus = async () => {
+    let isMounted = true;
+    const check = async () => {
+      if (authLoading || !user) {
+        if (isMounted) {
+          setConnected(false);
+          setUserEmail('');
+        }
+        return;
+      }
       try {
-        const res = await axios.get(`${API_BASE_URL}/api/gmail/status`);
-        setConnected(res.data.connected);
-        if (res.data.connected) {
-          setUserEmail(res.data.email);
+        const data = await fetchGmailStatus();
+        if (isMounted) {
+          setConnected(Boolean(data.connected));
+          if (data.connected && data.email) {
+            setUserEmail(data.email);
+          }
         }
       } catch (err) {
-        console.error("Status check failed", err);
+        console.warn("Hero status check notice:", err.message);
       }
     };
-    checkStatus();
-  }, []);
+    check();
+    return () => { isMounted = false; };
+  }, [user, authLoading]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">

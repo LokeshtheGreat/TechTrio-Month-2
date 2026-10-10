@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import API_BASE_URL from '../api.js';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { getBackendUrl } from '../config/api';
 
 export default function Analytics() {
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
-    axios.get(`${API_BASE_URL}/api/stats`)
+    axios.get(`${getBackendUrl()}/api/stats`)
       .then(res => setStats(res.data))
       .catch(err => console.error(err));
   }, []);
