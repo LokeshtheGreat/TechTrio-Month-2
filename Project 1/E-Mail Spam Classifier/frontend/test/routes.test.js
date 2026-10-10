@@ -128,3 +128,52 @@ describe('Legal Documents Content & Google Compliance Audit', () => {
     assert.equal(lastRule.destination, '/index.html', 'Catch-all rule must route to /index.html');
   });
 });
+
+describe('Hyperlinks & User Flow Accessibility', () => {
+  const appPath = path.resolve(__dirname, '../src/App.jsx');
+  const authModalPath = path.resolve(__dirname, '../src/components/AuthModal.jsx');
+  const liveMonitorPath = path.resolve(__dirname, '../src/components/LiveMonitor.jsx');
+
+  test('App.jsx provides explicit hyperlinks to /privacy-policy and /terms in footer and sidebar', () => {
+    assert.ok(fs.existsSync(appPath), 'App.jsx must exist');
+    const content = fs.readFileSync(appPath, 'utf8');
+
+    assert.ok(
+      content.includes('href="/privacy-policy"'),
+      'App.jsx must contain explicit href="/privacy-policy" anchor links'
+    );
+    assert.ok(
+      content.includes('href="/terms"'),
+      'App.jsx must contain explicit href="/terms" anchor links'
+    );
+  });
+
+  test('AuthModal.jsx includes Terms and Privacy Policy access in the sign-up/sign-in flow', () => {
+    assert.ok(fs.existsSync(authModalPath), 'AuthModal.jsx must exist');
+    const content = fs.readFileSync(authModalPath, 'utf8');
+
+    assert.ok(
+      content.includes('href="/privacy-policy"'),
+      'AuthModal.jsx must link to /privacy-policy'
+    );
+    assert.ok(
+      content.includes('href="/terms"'),
+      'AuthModal.jsx must link to /terms'
+    );
+  });
+
+  test('LiveMonitor.jsx includes Privacy Policy access near the Gmail Connect action', () => {
+    assert.ok(fs.existsSync(liveMonitorPath), 'LiveMonitor.jsx must exist');
+    const content = fs.readFileSync(liveMonitorPath, 'utf8');
+
+    assert.ok(
+      content.includes('href="/privacy-policy"'),
+      'LiveMonitor.jsx must link to /privacy-policy near connect flow'
+    );
+    assert.ok(
+      content.includes('href="/terms"'),
+      'LiveMonitor.jsx must link to /terms near connect flow'
+    );
+  });
+});
+

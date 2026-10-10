@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import DOMPurify from 'dompurify';
-import { Mail, AlertCircle, CheckCircle2, RefreshCw, X, ShieldAlert, ShieldCheck, Lock, LogIn, User } from 'lucide-react';
+import { Mail, AlertCircle, CheckCircle2, RefreshCw, X, ShieldAlert, ShieldCheck, Lock, LogIn, User, ExternalLink } from 'lucide-react';
 import { getBackendUrl, getAuthHeaders, getAuthToken, initiateGmailConnect, fetchGmailStatus } from '../config/api';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -248,6 +248,19 @@ export default function LiveMonitor() {
               Sign In to Connect Gmail
             </button>
           </div>
+          <p className="text-xs text-gray-500 mt-5">
+            Learn more about our data isolation and user privacy in our{' '}
+            <a
+              href="/privacy-policy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline font-medium inline-flex items-center gap-1"
+            >
+              Privacy Policy
+              <ExternalLink className="w-3 h-3 inline" />
+            </a>
+            .
+          </p>
         </div>
       </div>
     );
@@ -286,6 +299,29 @@ export default function LiveMonitor() {
               )}
             </button>
           </div>
+          <p className="text-xs text-gray-500 mt-5 max-w-md mx-auto leading-relaxed">
+            We use read-only Gmail access (<code className="font-mono text-[11px] bg-gray-100 px-1 py-0.5 rounded text-gray-700">gmail.readonly</code>) strictly to classify spam in-memory. We never compose, send, or delete emails. Read our{' '}
+            <a
+              href="/privacy-policy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline font-medium inline-flex items-center gap-0.5"
+            >
+              Privacy Policy
+              <ExternalLink className="w-3 h-3 inline" />
+            </a>
+            {' '}and{' '}
+            <a
+              href="/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline font-medium inline-flex items-center gap-0.5"
+            >
+              Terms of Service
+              <ExternalLink className="w-3 h-3 inline" />
+            </a>
+            .
+          </p>
         </div>
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex items-center justify-center gap-2 max-w-lg mx-auto">

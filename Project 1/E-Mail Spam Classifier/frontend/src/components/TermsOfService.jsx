@@ -23,19 +23,31 @@ export default function TermsOfService({ onNavigate }) {
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => onNavigate('privacy-policy')}
+            <a
+              href="/privacy-policy"
+              onClick={(e) => {
+                if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                  e.preventDefault();
+                  onNavigate('privacy-policy');
+                }
+              }}
               className="text-xs font-medium text-gray-600 hover:text-blue-600 transition-colors px-2 py-1"
             >
               Privacy Policy
-            </button>
-            <button
-              onClick={() => onNavigate('app')}
+            </a>
+            <a
+              href="/"
+              onClick={(e) => {
+                if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                  e.preventDefault();
+                  onNavigate('app');
+                }
+              }}
               className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg transition-colors border border-blue-200/60"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Back to App</span>
-            </button>
+            </a>
           </div>
         </div>
       </header>
@@ -377,13 +389,31 @@ export default function TermsOfService({ onNavigate }) {
         {/* Footer Navigation */}
         <div className="mt-12 text-center text-xs text-gray-500 space-y-3">
           <div className="flex items-center justify-center gap-4">
-            <button onClick={() => onNavigate('app')} className="hover:text-blue-600 transition-colors">
+            <a
+              href="/"
+              onClick={(e) => {
+                if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                  e.preventDefault();
+                  onNavigate('app');
+                }
+              }}
+              className="hover:text-blue-600 transition-colors"
+            >
               App Dashboard
-            </button>
+            </a>
             <span>•</span>
-            <button onClick={() => onNavigate('privacy-policy')} className="hover:text-blue-600 transition-colors">
+            <a
+              href="/privacy-policy"
+              onClick={(e) => {
+                if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                  e.preventDefault();
+                  onNavigate('privacy-policy');
+                }
+              }}
+              className="hover:text-blue-600 transition-colors"
+            >
               Privacy Policy
-            </button>
+            </a>
             <span>•</span>
             <a href="https://github.com/LokeshtheGreat/TechTrio-Month-2" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 transition-colors">
               GitHub Repository

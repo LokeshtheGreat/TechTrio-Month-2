@@ -57,6 +57,13 @@ function AppContent() {
     }
   };
 
+  const handleLinkClick = (e, route) => {
+    if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+      e.preventDefault();
+      navigateTo(route);
+    }
+  };
+
   if (currentRoute === 'privacy-policy') {
     return <PrivacyPolicy onNavigate={navigateTo} />;
   }
@@ -122,19 +129,21 @@ function AppContent() {
         <div>
           {/* Legal Navigation Links */}
           <div className="px-4 py-2 border-t border-gray-100 flex items-center justify-center gap-2 text-[11px] text-gray-500">
-            <button
-              onClick={() => navigateTo('privacy-policy')}
+            <a
+              href="/privacy-policy"
+              onClick={(e) => handleLinkClick(e, 'privacy-policy')}
               className="hover:text-blue-600 transition-colors"
             >
               Privacy Policy
-            </button>
+            </a>
             <span>•</span>
-            <button
-              onClick={() => navigateTo('terms')}
+            <a
+              href="/terms"
+              onClick={(e) => handleLinkClick(e, 'terms')}
               className="hover:text-blue-600 transition-colors"
             >
               Terms of Service
-            </button>
+            </a>
           </div>
 
           {/* User / Authentication Status Footer */}
@@ -189,19 +198,21 @@ function AppContent() {
         <footer className="mt-16 pt-6 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between text-xs text-gray-500 gap-4">
           <p>© 2026 Email Spam Shield. All rights reserved.</p>
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => navigateTo('privacy-policy')}
+            <a
+              href="/privacy-policy"
+              onClick={(e) => handleLinkClick(e, 'privacy-policy')}
               className="hover:text-blue-600 transition-colors"
             >
               Privacy Policy
-            </button>
+            </a>
             <span>•</span>
-            <button
-              onClick={() => navigateTo('terms')}
+            <a
+              href="/terms"
+              onClick={(e) => handleLinkClick(e, 'terms')}
               className="hover:text-blue-600 transition-colors"
             >
               Terms of Service
-            </button>
+            </a>
             <span>•</span>
             <a
               href="https://github.com/LokeshtheGreat/TechTrio-Month-2"

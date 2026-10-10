@@ -186,6 +186,28 @@ export default function AuthModal() {
               <span>{isSignUp ? 'Create Account' : 'Sign In'}</span>
             )}
           </button>
+
+          <p className="text-[11px] text-gray-500 text-center mt-3 leading-relaxed">
+            By continuing, you agree to our{' '}
+            <a
+              href="/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline font-medium"
+            >
+              Terms of Service
+            </a>{' '}
+            and{' '}
+            <a
+              href="/privacy-policy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline font-medium"
+            >
+              Privacy Policy
+            </a>
+            .
+          </p>
         </form>
 
         {/* Footer */}
