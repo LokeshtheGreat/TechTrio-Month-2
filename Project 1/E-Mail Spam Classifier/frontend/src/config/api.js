@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabaseClient.js';
  * In local development, falls back cleanly to 'http://localhost:5000'.
  */
 export const getBackendUrl = () => {
-  const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BACKEND_URL) || process.env?.VITE_BACKEND_URL;
+  const envUrl = (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_BACKEND_URL || import.meta.env?.VITE_API_BASE_URL)) || process.env?.VITE_BACKEND_URL || process.env?.VITE_API_BASE_URL;
   if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
     return envUrl.trim().replace(/\/+$/, '');
   }

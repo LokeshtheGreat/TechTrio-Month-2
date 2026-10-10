@@ -46,8 +46,25 @@ def configure_database(app_instance, db_url=None):
     return True
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'fallback-dev-key')
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'fallback-flask-key')
+is_production = bool(
+    os.environ.get('RENDER') or
+    os.environ.get('FLASK_ENV') == 'production' or
+    os.environ.get('NODE_ENV') == 'production'
+)
+
+flask_secret = os.environ.get('FLASK_SECRET_KEY')
+if not flask_secret:
+    if is_production:
+        raise RuntimeError("FLASK_SECRET_KEY environment variable is strictly required in production.")
+    flask_secret = 'dev-flask-secret-key-change-in-production'
+app.secret_key = flask_secret
+
+jwt_secret = os.environ.get('JWT_SECRET_KEY')
+if not jwt_secret:
+    if is_production:
+        raise RuntimeError("JWT_SECRET_KEY environment variable is strictly required in production.")
+    jwt_secret = 'dev-jwt-secret-key-change-in-production'
+app.config['JWT_SECRET_KEY'] = jwt_secret
 
 has_database = configure_database(app)
 if has_database:
