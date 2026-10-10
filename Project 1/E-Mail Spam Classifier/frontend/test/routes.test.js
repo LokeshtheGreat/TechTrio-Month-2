@@ -113,13 +113,18 @@ describe('Legal Documents Content & Google Compliance Audit', () => {
     assert.ok(content.includes('lokeshwar6248@gmail.com'), 'Must list maintainer contact email');
   });
 
-  test('vercel.json exists and configures SPA rewrites for deep links', () => {
+  test('vercel.json exists and configures SPA rewrites for deep links while preserving API routing', () => {
     assert.ok(fs.existsSync(vercelPath), 'vercel.json must exist');
     const config = JSON.parse(fs.readFileSync(vercelPath, 'utf8'));
     assert.ok(Array.isArray(config.rewrites), 'rewrites array must be defined');
-    const hasCatchAll = config.rewrites.some(
-      (r) => r.source === '/(.*)' && r.destination === '/index.html'
+
+    const hasApiRewrite = config.rewrites.some(
+      (r) => r.source.startsWith('/api') && r.destination.includes('onrender.com')
     );
-    assert.ok(hasCatchAll, 'Catch-all rewrite to /index.html must be present for SPA deep linking');
+    assert.ok(hasApiRewrite, 'API routes must be preserved and forwarded to Render backend');
+
+    const lastRule = config.rewrites[config.rewrites.length - 1];
+    assert.equal(lastRule.source, '/(.*)', 'Final rewrite rule must be catch-all');
+    assert.equal(lastRule.destination, '/index.html', 'Catch-all rule must route to /index.html');
   });
 });
