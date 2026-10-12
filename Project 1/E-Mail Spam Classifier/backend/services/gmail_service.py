@@ -69,8 +69,13 @@ def is_transient_gmail_error(exc):
 
 try:
     from dotenv import load_dotenv
-    # Ensure backend/.env or root .env is loaded if environment variables are not already present
-    if not os.environ.get('GOOGLE_CREDENTIALS_JSON'):
+    # Ensure backend/.env or root .env is loaded if credentials are not already present in environment
+    _has_creds = (
+        (os.environ.get('GOOGLE_CLIENT_ID') and os.environ.get('GOOGLE_CLIENT_SECRET')) or
+        (os.environ.get('GMAIL_CLIENT_ID') and os.environ.get('GMAIL_CLIENT_SECRET')) or
+        os.environ.get('GOOGLE_CREDENTIALS_JSON')
+    )
+    if not _has_creds:
         _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         for _env_candidate in [
             os.path.join(_backend_dir, '.env'),
@@ -80,24 +85,106 @@ try:
         ]:
             if os.path.exists(_env_candidate):
                 load_dotenv(_env_candidate)
-                if os.environ.get('GOOGLE_CREDENTIALS_JSON'):
+                if (
+                    (os.environ.get('GOOGLE_CLIENT_ID') and os.environ.get('GOOGLE_CLIENT_SECRET')) or
+                    (os.environ.get('GMAIL_CLIENT_ID') and os.environ.get('GMAIL_CLIENT_SECRET')) or
+                    os.environ.get('GOOGLE_CREDENTIALS_JSON')
+                ):
                     break
 except ImportError:
     pass
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
+
+def _resolve_default_redirect_uris():
+    """
+    Safely constructs a deduplicated list of OAuth redirect callback URLs.
+    Preserves BACKEND_URL, RENDER_EXTERNAL_URL, and local development endpoints.
+    """
+    explicit = (os.environ.get('GOOGLE_REDIRECT_URI') or os.environ.get('GMAIL_REDIRECT_URI') or '').strip()
+    uris = []
+    if explicit:
+        uris.append(explicit)
+
+    backend_url = (os.environ.get('BACKEND_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
+    if backend_url:
+        uris.append(f"{backend_url}/api/gmail/callback")
+
+    uris.append("https://e-mail-spam-shield.onrender.com/api/gmail/callback")
+    uris.append("http://localhost:5000/api/gmail/callback")
+
+    seen = set()
+    deduped = []
+    for u in uris:
+        if u and u not in seen:
+            seen.add(u)
+            deduped.append(u)
+    return deduped
+
+
 class GmailService:
     def __init__(self, creds_dict=None):
         self.creds = None
         if creds_dict:
-            self.creds = Credentials.from_authorized_user_info(creds_dict, SCOPES)
-            if self.creds and self.creds.expired and self.creds.refresh_token:
+            if isinstance(creds_dict, str):
+                try:
+                    creds_dict = json.loads(creds_dict)
+                except Exception:
+                    creds_dict = None
+            if not isinstance(creds_dict, dict):
+                return
+
+            effective_creds = dict(creds_dict)
+            active_id, active_secret = self.get_active_client_id_and_secret()
+            stored_id = effective_creds.get('client_id')
+
+            # Reconcile client credentials safely:
+            # Only update client_secret if active credentials exist AND
+            # stored client_id matches active client_id (or stored client_id is missing/empty).
+            # Do NOT mutate or overwrite if stored client_id explicitly mismatches active client_id.
+            if active_id and active_secret:
+                if not stored_id or str(stored_id).strip() == str(active_id).strip():
+                    if not stored_id:
+                        effective_creds['client_id'] = active_id
+                    effective_creds['client_secret'] = active_secret
+
+            try:
+                self.creds = Credentials.from_authorized_user_info(effective_creds, SCOPES)
+            except Exception as e:
+                print("Error initializing credentials:", e)
+                self.creds = None
+
+            if self.creds and (self.creds.expired or not self.creds.valid) and self.creds.refresh_token:
                 try:
                     self.creds.refresh(Request())
                 except Exception as e:
                     print("Error refreshing token:", e)
                     self.creds = None
+
+    def refresh_credentials(self, request=None):
+        """
+        Explicitly refreshes expired credentials using the active Request.
+        Reconciles active client credentials before refresh if compatible.
+        Returns True if refreshed successfully, False otherwise.
+        """
+        if not self.creds or not self.creds.refresh_token:
+            return False
+
+        active_id, active_secret = self.get_active_client_id_and_secret()
+        if active_id and active_secret:
+            stored_id = getattr(self.creds, 'client_id', None)
+            if not stored_id or str(stored_id).strip() == str(active_id).strip():
+                self.creds._client_id = active_id
+                self.creds._client_secret = active_secret
+
+        try:
+            req = request or Request()
+            self.creds.refresh(req)
+            return self.is_connected()
+        except Exception as e:
+            print("Error refreshing token:", e)
+            return False
 
     def is_connected(self):
         return self.creds is not None and self.creds.valid
@@ -114,19 +201,65 @@ class GmailService:
             pass
         self.creds = None
 
+    @classmethod
+    def get_active_client_config(cls):
+        """
+        Safely retrieves the active client configuration without throwing if unconfigured.
+        Returns the parsed dictionary, or None.
+        """
+        try:
+            return cls._get_client_config()
+        except Exception:
+            return None
+
+    @classmethod
+    def get_active_client_id_and_secret(cls):
+        """
+        Extracts (client_id, client_secret) from the active client configuration.
+        Returns (client_id, client_secret) or (None, None).
+        """
+        # Fast path from discrete environment variables
+        client_id = (os.environ.get('GOOGLE_CLIENT_ID') or os.environ.get('GMAIL_CLIENT_ID') or '').strip()
+        client_secret = (os.environ.get('GOOGLE_CLIENT_SECRET') or os.environ.get('GMAIL_CLIENT_SECRET') or '').strip()
+        if client_id and client_secret:
+            return client_id, client_secret
+
+        config = cls.get_active_client_config()
+        if not config:
+            return None, None
+        app_config = config.get('web') or config.get('installed') or {}
+        cid = (app_config.get('client_id') or '').strip() or None
+        csec = (app_config.get('client_secret') or '').strip() or None
+        return cid, csec
+
     @staticmethod
     def _get_client_config():
         """
         Safely retrieves and parses the Google OAuth client configuration.
-        Prioritizes the GOOGLE_CREDENTIALS_JSON environment variable (used in production on Render
-        and local development).
-        Supports:
-          1. Direct JSON string in GOOGLE_CREDENTIALS_JSON (safe parsing, handling quotes/escapes).
-          2. File path in GOOGLE_CREDENTIALS_JSON pointing to credentials file.
-          3. Local file fallbacks (backend/credentials.json or root credentials.json).
+        Prioritizes discrete environment variables GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
+        (with GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET aliases).
+        Falls back to GOOGLE_CREDENTIALS_JSON (direct JSON string or file path),
+        and local candidate files (backend/credentials.json or root credentials.json).
         Returns the parsed dictionary.
         Raises ValueError or RuntimeError if credentials cannot be resolved or parsed.
         """
+        # 1. Preferred Production Configuration: discrete client ID and secret
+        client_id = (os.environ.get('GOOGLE_CLIENT_ID') or os.environ.get('GMAIL_CLIENT_ID') or '').strip()
+        client_secret = (os.environ.get('GOOGLE_CLIENT_SECRET') or os.environ.get('GMAIL_CLIENT_SECRET') or '').strip()
+
+        if client_id and client_secret:
+            return {
+                "web": {
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                    "redirect_uris": _resolve_default_redirect_uris()
+                }
+            }
+
+        # 2. Backward-compatible fallback: GOOGLE_CREDENTIALS_JSON or candidate files
         creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 
         # If not present in os.environ, attempt loading backend/.env if available
@@ -137,6 +270,20 @@ class GmailService:
                 env_file = os.path.join(backend_dir, '.env')
                 if os.path.exists(env_file):
                     load_dotenv(env_file)
+                    # Re-check discrete variables if loaded from .env
+                    client_id = (os.environ.get('GOOGLE_CLIENT_ID') or os.environ.get('GMAIL_CLIENT_ID') or '').strip()
+                    client_secret = (os.environ.get('GOOGLE_CLIENT_SECRET') or os.environ.get('GMAIL_CLIENT_SECRET') or '').strip()
+                    if client_id and client_secret:
+                        return {
+                            "web": {
+                                "client_id": client_id,
+                                "client_secret": client_secret,
+                                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                                "token_uri": "https://oauth2.googleapis.com/token",
+                                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                                "redirect_uris": _resolve_default_redirect_uris()
+                            }
+                        }
                     creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
             except ImportError:
                 pass
@@ -192,7 +339,8 @@ class GmailService:
         if not client_config:
             raise RuntimeError(
                 "Google OAuth credentials not found. "
-                "Please configure the GOOGLE_CREDENTIALS_JSON environment variable with your OAuth client credentials JSON, "
+                "Please configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, "
+                "or GOOGLE_CREDENTIALS_JSON with your OAuth client credentials JSON, "
                 "or place a credentials.json file in the backend directory."
             )
 
