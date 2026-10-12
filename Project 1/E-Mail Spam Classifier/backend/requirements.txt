@@ -10,7 +10,6 @@ bcrypt
 python-dotenv
 scikit-learn
 joblib
-pandas
 numpy
 google-auth
 google-auth-oauthlib

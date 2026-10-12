@@ -8,11 +8,34 @@ import { supabase } from '../lib/supabaseClient.js';
  * In local development, falls back cleanly to 'http://localhost:5000'.
  */
 export const getBackendUrl = () => {
-  const envUrl = (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_BACKEND_URL || import.meta.env?.VITE_API_BASE_URL)) || process.env?.VITE_BACKEND_URL || process.env?.VITE_API_BASE_URL;
+  const envUrl =
+    (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_BACKEND_URL || import.meta.env?.VITE_API_BASE_URL)) ||
+    (typeof process !== 'undefined' && (process.env?.VITE_BACKEND_URL || process.env?.VITE_API_BASE_URL));
   if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
     return envUrl.trim().replace(/\/+$/, '');
   }
+  if (typeof window !== 'undefined' && window.location?.hostname && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    return 'https://e-mail-spam-shield.onrender.com';
+  }
   return 'http://localhost:5000';
+};
+
+/**
+ * Resolves the frontend base URL for redirect flows (e.g. Supabase password reset, OAuth callbacks).
+ * In production (e.g., Vercel), uses VITE_FRONTEND_URL or window.location.origin.
+ * Strips any trailing slashes to prevent malformed redirect paths.
+ */
+export const getFrontendUrl = () => {
+  const envUrl =
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_FRONTEND_URL) ||
+    (typeof process !== 'undefined' && process.env?.VITE_FRONTEND_URL);
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin.replace(/\/+$/, '');
+  }
+  return 'https://e-mail-spam-shield.vercel.app';
 };
 
 /**

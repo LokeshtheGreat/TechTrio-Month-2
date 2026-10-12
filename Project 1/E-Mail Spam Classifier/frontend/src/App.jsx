@@ -9,6 +9,7 @@ import HowItWorks from './components/HowItWorks';
 import AuthModal from './components/AuthModal';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import TermsOfService from './components/TermsOfService';
+import ResetPassword from './components/ResetPassword';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { getRouteFromUrl, getRoutePath } from './utils/routes';
 
@@ -23,7 +24,7 @@ function AppContent() {
     }
     return 'overview';
   });
-  const { user, openAuthModal, signOut } = useAuth();
+  const { user, openAuthModal, signOut, isPasswordRecovery } = useAuth();
 
   useEffect(() => {
     const handleLocationChange = () => {
@@ -36,6 +37,12 @@ function AppContent() {
       window.removeEventListener('hashchange', handleLocationChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (isPasswordRecovery && currentRoute !== 'reset-password') {
+      setCurrentRoute('reset-password');
+    }
+  }, [isPasswordRecovery, currentRoute]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -70,6 +77,10 @@ function AppContent() {
 
   if (currentRoute === 'terms') {
     return <TermsOfService onNavigate={navigateTo} />;
+  }
+
+  if (currentRoute === 'reset-password') {
+    return <ResetPassword onNavigate={navigateTo} />;
   }
 
   const tabs = [

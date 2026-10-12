@@ -35,6 +35,10 @@ class SpamClassifier:
         if not self.model or not self.vectorizer:
             return {"error": "Models not loaded"}
             
+        # Prevent pathological input lengths from causing Scikit-Learn TF-IDF vectorizer memory spikes
+        if isinstance(message, str) and len(message) > 25000:
+            message = message[:25000]
+
         features = self.vectorizer.transform([message])
         
         prediction = self.model.predict(features)[0]

@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, redirect, session, g
 from flask_cors import CORS
 import sys
 import uuid
+import hmac
 import urllib.parse
 from datetime import datetime
 from flask_jwt_extended import JWTManager
@@ -214,22 +215,33 @@ def get_user_gmail_service(user_id):
 def get_backend_url():
     """
     Resolves the base backend URL for OAuth redirects and callbacks.
-    Prioritizes BACKEND_URL, then RENDER_EXTERNAL_URL (automatically provided by Render),
-    falling back to http://localhost:5000 for local development.
+    Prioritizes BACKEND_URL, then RENDER_EXTERNAL_URL (automatically provided by Render).
+    In production environments (e.g. on Render), falls back to https://e-mail-spam-shield.onrender.com.
+    In local development, falls back cleanly to http://localhost:5000.
     Always strips trailing slashes to prevent malformed redirect URIs.
     """
-    raw = os.environ.get('BACKEND_URL') or os.environ.get('RENDER_EXTERNAL_URL') or 'http://localhost:5000'
-    return raw.strip().rstrip('/')
+    raw = os.environ.get('BACKEND_URL') or os.environ.get('RENDER_EXTERNAL_URL')
+    if raw and raw.strip():
+        return raw.strip().rstrip('/')
+    if is_production:
+        return 'https://e-mail-spam-shield.onrender.com'
+    return 'http://localhost:5000'
 
 
 def get_frontend_url():
     """
     Resolves the base frontend URL for post-OAuth browser redirection.
-    Prioritizes FRONTEND_URL, falling back to http://localhost:5173 for local development.
+    Prioritizes FRONTEND_URL.
+    In production environments (e.g. on Render), falls back to https://e-mail-spam-shield.vercel.app.
+    In local development, falls back cleanly to http://localhost:5173.
     Always strips trailing slashes.
     """
-    raw = os.environ.get('FRONTEND_URL') or 'http://localhost:5173'
-    return raw.strip().rstrip('/')
+    raw = os.environ.get('FRONTEND_URL')
+    if raw and raw.strip():
+        return raw.strip().rstrip('/')
+    if is_production:
+        return 'https://e-mail-spam-shield.vercel.app'
+    return 'http://localhost:5173'
 
 
 # ---- GMAIL ROUTES ----
@@ -479,8 +491,9 @@ def renew_watch():
         return jsonify({"success": True, "historyId": res.get('historyId'), "expiration": expiration}), 200
     except Exception as e:
         conn.monitoring_status = 'failed'
+        conn.updated_at = datetime.utcnow()
         db.session.commit()
-        return jsonify({"error": "Failed to renew Gmail watch."}), 400
+        return jsonify({"error": f"Failed to renew Gmail watch: {str(e)}"}), 400
 
 
 last_history_poll = {}
@@ -640,6 +653,7 @@ def get_latest_emails():
             if topic and 'dummy' not in topic:
                 try:
                     res = service.start_watch(topic)
+                    persist_credentials_if_refreshed(conn, service)
                     conn.watch_expiration = int(res.get('expiration', 0)) if res.get('expiration') else None
                     conn.history_id = res.get('historyId')
                     conn.monitoring_status = 'active'
@@ -648,6 +662,7 @@ def get_latest_emails():
                 except Exception as e:
                     print(f"Auto-renewal failed for user {g.user_id}: {e}")
                     conn.monitoring_status = 'failed'
+                    conn.updated_at = datetime.utcnow()
                     db.session.commit()
 
     records = ClassifiedEmail.query.filter_by(user_id=g.user_id).order_by(
@@ -705,31 +720,126 @@ def get_latest_emails():
 @app.route('/api/gmail/cron/renew', methods=['POST', 'GET'])
 def cron_renew_watch():
     expected_secret = os.environ.get('CRON_SECRET')
-    if expected_secret and request.args.get('secret') != expected_secret:
+    if not expected_secret or not expected_secret.strip():
+        return jsonify({"error": "Unauthorized: CRON_SECRET is not configured on the server."}), 401
+
+    provided_secret = None
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        provided_secret = auth_header[7:].strip()
+    elif request.headers.get('X-Cron-Secret'):
+        provided_secret = request.headers.get('X-Cron-Secret').strip()
+    elif request.args.get('secret'):
+        provided_secret = request.args.get('secret').strip()
+    elif request.is_json and request.json and request.json.get('secret'):
+        provided_secret = str(request.json.get('secret')).strip()
+    elif request.form and request.form.get('secret'):
+        provided_secret = request.form.get('secret').strip()
+
+    if not provided_secret or not hmac.compare_digest(provided_secret, expected_secret.strip()):
         return jsonify({"error": "Unauthorized"}), 401
 
     topic = os.environ.get('PUBSUB_TOPIC_NAME')
     if not topic or 'dummy' in topic:
-        return jsonify({"error": "PUBSUB_TOPIC_NAME environment variable is not configured for production."}), 500
+        return jsonify({
+            "success": False,
+            "error": "PUBSUB_TOPIC_NAME environment variable is not configured for production."
+        }), 500
 
     if not app.config.get('SQLALCHEMY_DATABASE_URI'):
-        return jsonify({"error": "Database not configured."}), 503
+        return jsonify({
+            "success": False,
+            "error": "Database not configured."
+        }), 503
 
-    active_conns = GmailConnection.query.filter_by(monitoring_status='active').all()
+    eligible_conns = GmailConnection.query.filter(
+        GmailConnection.monitoring_status.in_(['active', 'failed']),
+        GmailConnection.encrypted_credentials_json.isnot(None)
+    ).all()
+
+    total_eligible = len(eligible_conns)
     renewed_count = 0
-    for conn in active_conns:
+    failures = []
+
+    for conn in eligible_conns:
         service, _ = get_user_gmail_service(conn.user_id)
-        if service and service.is_connected():
-            try:
-                res = service.start_watch(topic)
-                conn.watch_expiration = int(res.get('expiration', 0)) if res.get('expiration') else None
-                conn.history_id = res.get('historyId')
-                renewed_count += 1
-            except Exception as e:
-                print(f"Cron renewal failed for user {conn.user_id}: {e}")
-                conn.monitoring_status = 'failed'
-    db.session.commit()
-    return jsonify({"success": True, "renewed": renewed_count}), 200
+        if not service or not service.is_connected():
+            conn.monitoring_status = 'failed'
+            conn.updated_at = datetime.utcnow()
+            failures.append({
+                "user_id": conn.user_id,
+                "email": conn.gmail_address or "unknown",
+                "error": "Google credentials invalid, expired, or disconnected."
+            })
+            continue
+
+        try:
+            res = service.start_watch(topic)
+            persist_credentials_if_refreshed(conn, service)
+            conn.watch_expiration = int(res.get('expiration', 0)) if res.get('expiration') else None
+            conn.history_id = res.get('historyId')
+            conn.monitoring_status = 'active'
+            conn.updated_at = datetime.utcnow()
+            renewed_count += 1
+        except Exception as e:
+            conn.monitoring_status = 'failed'
+            conn.updated_at = datetime.utcnow()
+            failures.append({
+                "user_id": conn.user_id,
+                "email": conn.gmail_address or "unknown",
+                "error": str(e)
+            })
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "error": f"Database commit failed: {str(e)}",
+            "total_eligible": total_eligible,
+            "renewed": 0,
+            "failed": total_eligible
+        }), 500
+
+    if total_eligible == 0:
+        return jsonify({
+            "success": True,
+            "message": "No active or eligible Gmail connections found to renew.",
+            "total_eligible": 0,
+            "renewed": 0,
+            "failed": 0,
+            "failures": []
+        }), 200
+
+    if len(failures) == 0:
+        return jsonify({
+            "success": True,
+            "total_eligible": total_eligible,
+            "renewed": renewed_count,
+            "failed": 0,
+            "failures": []
+        }), 200
+
+    if renewed_count == 0:
+        return jsonify({
+            "success": False,
+            "total_eligible": total_eligible,
+            "renewed": 0,
+            "failed": len(failures),
+            "failures": failures,
+            "error": "All Gmail watch renewals failed."
+        }), 500
+
+    return jsonify({
+        "success": False,
+        "partial_success": True,
+        "total_eligible": total_eligible,
+        "renewed": renewed_count,
+        "failed": len(failures),
+        "failures": failures,
+        "error": f"{len(failures)} of {total_eligible} Gmail watch renewals failed."
+    }), 207
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
