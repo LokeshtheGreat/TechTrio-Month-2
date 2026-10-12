@@ -1,10 +1,71 @@
 import os
 import base64
+import time
+import random
+import socket
+import ssl
+import http.client
+import urllib.error
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from google.auth.transport.requests import Request
 import json
+
+TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
+PERMANENT_HTTP_STATUSES = {400, 401, 403, 404}
+TRANSIENT_NETWORK_EXCEPTIONS = (
+    TimeoutError,
+    ConnectionError,
+    socket.timeout,
+    ssl.SSLError,
+    http.client.RemoteDisconnected,
+    http.client.ResponseNotReady,
+    urllib.error.URLError,
+)
+
+
+def is_transient_gmail_error(exc):
+    """
+    Determines whether an error encountered during a Gmail API call is transient and safe to retry.
+    Retryable: HTTP 429, 500, 502, 503, 504, plus temporary connection/timeout exceptions.
+    Non-retryable: HTTP 400, 401, 403, 404, invalid grants, authentication/authorization failures.
+    """
+    if isinstance(exc, HttpError):
+        status = getattr(exc.resp, 'status', None) if hasattr(exc, 'resp') else getattr(exc, 'status_code', None)
+        if status is not None:
+            try:
+                status_int = int(status)
+                if status_int in TRANSIENT_HTTP_STATUSES:
+                    return True
+                if status_int in PERMANENT_HTTP_STATUSES:
+                    return False
+            except (ValueError, TypeError):
+                pass
+        err_str = str(exc).lower()
+        for perm in ('400', '401', '403', '404', 'invalid_grant', 'permissiondenied'):
+            if perm in err_str:
+                return False
+        for trans in ('429', '500', '502', '503', '504', 'ratelimitexceeded', 'backenderror'):
+            if trans in err_str:
+                return True
+        return False
+
+    if isinstance(exc, TRANSIENT_NETWORK_EXCEPTIONS):
+        return True
+
+    # Generic or wrapped exceptions
+    err_str = str(exc).lower()
+    for perm in ('400', '401', '403', '404', 'invalid_grant', 'forbidden', 'unauthorized', 'permission'):
+        if perm in err_str:
+            return False
+    for trans in ('429', '500', '502', '503', '504', 'timeout', 'timed out', 'connection reset', 'connection refused', 'remote disconnected'):
+        if trans in err_str:
+            return True
+
+    return False
+
 
 try:
     from dotenv import load_dotenv
@@ -291,7 +352,12 @@ class GmailService:
                 
         return html_data
 
-    def start_watch(self, topic_name):
+    def start_watch(self, topic_name, max_retries=2, initial_backoff=0.5, max_backoff=2.0, sleep_fn=time.sleep):
+        """
+        Registers a Gmail push watch for INBOX with bounded exponential backoff on transient errors.
+        Retries up to max_retries times (max 3 total attempts) on HTTP 429, 500, 502, 503, 504 and network errors.
+        Does not retry permanent errors such as 400, 401, 403, 404.
+        """
         if not self.is_connected():
             raise Exception("Not connected to Gmail")
         service = build('gmail', 'v1', credentials=self.creds)
@@ -300,8 +366,25 @@ class GmailService:
             'labelFilterBehavior': 'INCLUDE',
             'topicName': topic_name
         }
-        res = service.users().watch(userId='me', body=request).execute()
-        return res
+
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                res = service.users().watch(userId='me', body=request).execute()
+                return res
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries and is_transient_gmail_error(e):
+                    backoff = min(max_backoff, initial_backoff * (2 ** attempt))
+                    jitter = random.uniform(0.05, 0.25)
+                    delay = backoff + jitter
+                    if sleep_fn:
+                        sleep_fn(delay)
+                    continue
+                raise last_error
+
+        raise last_error
+
 
     def stop_watch(self):
         if not self.is_connected():

@@ -493,3 +493,240 @@ def test_latest_passive_renewal_triggers_when_expiration_near():
                 assert conn.watch_expiration == 1744384000000
                 assert conn.history_id == 'new-passive-hist'
                 mock_commit.assert_called()
+
+
+# =========================================================================
+# 7. TRANSIENT RETRY STRATEGY & PERMANENT ERROR SAFEGUARD TESTS
+# =========================================================================
+
+def _make_http_error(status_code, reason="Error"):
+    from googleapiclient.errors import HttpError
+    from unittest.mock import Mock
+    mock_resp = Mock()
+    mock_resp.status = status_code
+    mock_resp.reason = reason
+    return HttpError(mock_resp, b'{"error": "mock_error"}')
+
+
+def test_is_transient_gmail_error_classification():
+    """Verify that transient HTTP statuses and network exceptions are retryable, and permanent ones are not."""
+    import socket
+    import ssl
+    from services.gmail_service import is_transient_gmail_error
+
+    # Retryable HTTP status codes
+    for status in [429, 500, 502, 503, 504]:
+        err = _make_http_error(status)
+        assert is_transient_gmail_error(err) is True, f"HTTP {status} must be classified as transient"
+
+    # Non-retryable HTTP status codes
+    for status in [400, 401, 403, 404]:
+        err = _make_http_error(status)
+        assert is_transient_gmail_error(err) is False, f"HTTP {status} must be classified as non-retryable permanent error"
+
+    # Supported network/timeout exceptions
+    assert is_transient_gmail_error(socket.timeout("Socket timed out")) is True
+    assert is_transient_gmail_error(TimeoutError("Operation timed out")) is True
+    assert is_transient_gmail_error(ConnectionResetError("Connection reset by peer")) is True
+    assert is_transient_gmail_error(ssl.SSLError("SSL handshake error")) is True
+
+    # Generic string checks
+    assert is_transient_gmail_error(Exception("503 Backend Error")) is True
+    assert is_transient_gmail_error(Exception("403 Forbidden: insufficient permissions")) is False
+
+
+def test_start_watch_retries_transient_error_and_succeeds():
+    """start_watch must retry up to 2 times for transient errors with bounded backoff and succeed."""
+    from services.gmail_service import GmailService
+
+    service_instance = GmailService()
+    service_instance.creds = MagicMock()
+    service_instance.is_connected = MagicMock(return_value=True)
+
+    mock_execute = MagicMock()
+    transient_err = _make_http_error(503, "Backend Error")
+    success_resp = {'historyId': 'hist-recovered', 'expiration': '1744384000000'}
+    # 1st call fails with 503, 2nd call succeeds
+    mock_execute.side_effect = [transient_err, success_resp]
+
+    mock_watch = MagicMock()
+    mock_watch.execute = mock_execute
+    mock_users = MagicMock()
+    mock_users.watch.return_value = mock_watch
+    mock_api = MagicMock()
+    mock_api.users.return_value = mock_users
+
+    sleep_calls = []
+    fake_sleep = lambda delay: sleep_calls.append(delay)
+
+    with patch('services.gmail_service.build', return_value=mock_api):
+        res = service_instance.start_watch(
+            VALID_TOPIC,
+            max_retries=2,
+            initial_backoff=0.2,
+            sleep_fn=fake_sleep
+        )
+
+        assert res == success_resp
+        assert mock_execute.call_count == 2
+        assert len(sleep_calls) == 1
+        # Bounded backoff with jitter: around 0.2 + jitter
+        assert 0.1 <= sleep_calls[0] <= 1.0
+
+
+def test_start_watch_permanent_error_fails_immediately_without_retry():
+    """start_watch must NOT retry permanent errors (e.g. 403 Forbidden) and must fail on the 1st attempt."""
+    from services.gmail_service import GmailService
+    from googleapiclient.errors import HttpError
+
+    service_instance = GmailService()
+    service_instance.creds = MagicMock()
+    service_instance.is_connected = MagicMock(return_value=True)
+
+    mock_execute = MagicMock()
+    perm_err = _make_http_error(403, "Forbidden")
+    mock_execute.side_effect = perm_err
+
+    mock_watch = MagicMock()
+    mock_watch.execute = mock_execute
+    mock_users = MagicMock()
+    mock_users.watch.return_value = mock_watch
+    mock_api = MagicMock()
+    mock_api.users.return_value = mock_users
+
+    sleep_calls = []
+    fake_sleep = lambda delay: sleep_calls.append(delay)
+
+    with patch('services.gmail_service.build', return_value=mock_api):
+        with pytest.raises(HttpError) as exc_info:
+            service_instance.start_watch(
+                VALID_TOPIC,
+                max_retries=2,
+                sleep_fn=fake_sleep
+            )
+
+        assert exc_info.value.resp.status == 403
+        assert mock_execute.call_count == 1
+        assert len(sleep_calls) == 0  # Zero retries, zero sleep calls
+
+
+def test_start_watch_exhausted_retries_raises_after_max_attempts():
+    """start_watch must attempt at most 3 times (1 initial + 2 retries) when transient errors persist."""
+    from services.gmail_service import GmailService
+    from googleapiclient.errors import HttpError
+
+    service_instance = GmailService()
+    service_instance.creds = MagicMock()
+    service_instance.is_connected = MagicMock(return_value=True)
+
+    mock_execute = MagicMock()
+    transient_500 = _make_http_error(500, "Internal Server Error")
+    mock_execute.side_effect = transient_500
+
+    mock_watch = MagicMock()
+    mock_watch.execute = mock_execute
+    mock_users = MagicMock()
+    mock_users.watch.return_value = mock_watch
+    mock_api = MagicMock()
+    mock_api.users.return_value = mock_users
+
+    sleep_calls = []
+    fake_sleep = lambda delay: sleep_calls.append(delay)
+
+    with patch('services.gmail_service.build', return_value=mock_api):
+        with pytest.raises(HttpError) as exc_info:
+            service_instance.start_watch(
+                VALID_TOPIC,
+                max_retries=2,
+                initial_backoff=0.1,
+                sleep_fn=fake_sleep
+            )
+
+        assert exc_info.value.resp.status == 500
+        # 1 initial + 2 retries = 3 calls total
+        assert mock_execute.call_count == 3
+        assert len(sleep_calls) == 2
+
+
+def test_cron_renew_multi_user_isolation_with_transient_and_permanent_failures():
+    """
+    Verify multi-user isolation during cron renewal when:
+    - User A succeeds after a transient retry
+    - User B fails on a permanent error
+    - User C succeeds immediately on first attempt
+    Returns HTTP 207 Multi-Status, records user B failure without impacting A and C.
+    """
+    user_a_id = 'user-uuid-transient'
+    user_b_id = 'user-uuid-permanent'
+    user_c_id = 'user-uuid-clean'
+
+    conn_a = MagicMock(user_id=user_a_id, gmail_address='transient@ex.com', monitoring_status='failed', watch_expiration=None)
+    conn_b = MagicMock(user_id=user_b_id, gmail_address='permanent@ex.com', monitoring_status='active', watch_expiration=1700000000000)
+    conn_c = MagicMock(user_id=user_c_id, gmail_address='clean@ex.com', monitoring_status='active', watch_expiration=1700000000000)
+
+    mock_service_a = MagicMock()
+    mock_service_a.is_connected.return_value = True
+    # User A succeeds
+    mock_service_a.start_watch.return_value = {'historyId': 'hist-a', 'expiration': '1744384000000'}
+
+    mock_service_b = MagicMock()
+    mock_service_b.is_connected.return_value = True
+    # User B encounters permanent failure
+    mock_service_b.start_watch.side_effect = Exception("403 Forbidden: OAuth scope revoked")
+
+    mock_service_c = MagicMock()
+    mock_service_c.is_connected.return_value = True
+    # User C succeeds
+    mock_service_c.start_watch.return_value = {'historyId': 'hist-c', 'expiration': '1744384000000'}
+
+    def fake_get_service(uid):
+        if uid == user_a_id:
+            return mock_service_a, conn_a
+        elif uid == user_b_id:
+            return mock_service_b, conn_b
+        elif uid == user_c_id:
+            return mock_service_c, conn_c
+        return None, None
+
+    with app.app_context():
+        with app.test_client() as client:
+            with patch.object(GmailConnection, 'query') as mock_query, \
+                 patch('app.get_user_gmail_service', side_effect=fake_get_service), \
+                 patch('app.persist_credentials_if_refreshed') as mock_persist, \
+                 patch.object(db.session, 'commit') as mock_commit:
+
+                mock_filter = MagicMock()
+                mock_filter.all.return_value = [conn_a, conn_b, conn_c]
+                mock_query.filter.return_value = mock_filter
+
+                res = client.post(
+                    '/api/gmail/cron/renew',
+                    headers={'Authorization': f'Bearer {TEST_CRON_SECRET}'}
+                )
+
+                assert res.status_code == 207
+                data = res.get_json()
+
+                assert data.get('success') is False
+                assert data.get('partial_success') is True
+                assert data.get('total_eligible') == 3
+                assert data.get('renewed') == 2
+                assert data.get('failed') == 1
+
+                # User A recovered to active
+                assert conn_a.monitoring_status == 'active'
+                assert conn_a.watch_expiration == 1744384000000
+                assert conn_a.history_id == 'hist-a'
+
+                # User B marked as failed
+                assert conn_b.monitoring_status == 'failed'
+
+                # User C remained active
+                assert conn_c.monitoring_status == 'active'
+                assert conn_c.watch_expiration == 1744384000000
+                assert conn_c.history_id == 'hist-c'
+
+                # Verify persistence and commit were called
+                assert mock_persist.call_count == 2  # for users A and C
+                mock_commit.assert_called_once()
+
