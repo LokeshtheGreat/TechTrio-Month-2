@@ -5,6 +5,7 @@ Exposes REST endpoints for message analysis and model health check.
 Configures CORS for local frontend communication.
 """
 
+import os
 import sys
 import logging
 from flask import Flask, request, jsonify
@@ -104,6 +105,6 @@ def predict():
 
 
 if __name__ == "__main__":
-    port = 5000
+    port = int(os.environ.get("PORT", 5000))
     logger.info("Starting PhishShift Flask API server on port %d...", port)
-    app.run(host="127.0.0.1", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False)

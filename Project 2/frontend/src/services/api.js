@@ -3,7 +3,8 @@
  * Communicates with the Flask backend REST API.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const rawBaseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_BACKEND_URL || '';
+const API_BASE_URL = rawBaseUrl.replace(/\/+$/, '');
 
 export async function analyzeMessage(message) {
   const trimmed = (message || '').trim();
@@ -37,7 +38,7 @@ export async function analyzeMessage(message) {
   } catch (err) {
     // Distinguish between network connection errors and backend rejection
     if (err.name === 'TypeError' && err.message.includes('fetch')) {
-      throw new Error('Unable to connect to the PhishShift backend server. Please verify that the Flask service is running on port 5000.');
+      throw new Error('Unable to connect to the PhishShift backend service. Please check your network connection or verify that the backend server is running and accessible.');
     }
     throw err;
   }
