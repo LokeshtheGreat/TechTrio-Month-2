@@ -11,30 +11,43 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [backendStatus, setBackendStatus] = useState({
+    state: 'checking',
     healthy: false,
     modelLoaded: false,
-    checking: true,
+    message: 'Checking...',
   });
 
-  // Verify backend health on mount
+  // Verify backend health on mount and periodically every 30 seconds
   useEffect(() => {
     let isMounted = true;
+    let abortController = new AbortController();
+
     const verifyHealth = async () => {
-      const status = await checkBackendHealth();
-      if (isMounted) {
-        setBackendStatus({
-          healthy: status.healthy,
-          modelLoaded: status.modelLoaded,
-          checking: false,
+      try {
+        const status = await checkBackendHealth({
+          externalSignal: abortController.signal,
         });
+        if (isMounted) {
+          setBackendStatus(status);
+        }
+      } catch {
+        if (isMounted) {
+          setBackendStatus({
+            state: 'offline',
+            healthy: false,
+            modelLoaded: false,
+            message: 'Offline / Unreachable',
+          });
+        }
       }
     };
 
     verifyHealth();
-    // Periodic check every 15 seconds
-    const intervalId = setInterval(verifyHealth, 15000);
+    const intervalId = setInterval(verifyHealth, 30000);
+
     return () => {
       isMounted = false;
+      abortController.abort();
       clearInterval(intervalId);
     };
   }, []);

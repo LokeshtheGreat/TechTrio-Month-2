@@ -14,6 +14,7 @@ export default function PredictionResult({ result }) {
 
   const {
     final_prediction,
+    text_prediction,
     url_analysis,
     reason,
     content_analysis,
@@ -49,6 +50,15 @@ export default function PredictionResult({ result }) {
 
   const OutcomeIcon = outcomeConfig.icon;
 
+  const getBadgeClass = (pred) => {
+    if (pred === 'Phishing') return 'phishing';
+    if (pred === 'Legitimate') return 'legitimate';
+    return 'review';
+  };
+
+  const isVerdictShifted =
+    text_prediction && final_prediction && text_prediction !== final_prediction;
+
   return (
     <section className="result-section" aria-label="Analysis Results">
       {/* 1. Main Outcome Banner */}
@@ -66,6 +76,29 @@ export default function PredictionResult({ result }) {
         </div>
 
         <p className="outcome-explanation">{reason}</p>
+
+        {/* Audit row: Clearly displays original text model prediction alongside final verdict */}
+        <div className="outcome-audit-strip">
+          <div className="audit-item">
+            <span className="audit-label">Text Model:</span>
+            <span className={`audit-badge ${getBadgeClass(text_prediction || final_prediction)}`}>
+              {text_prediction || final_prediction}
+            </span>
+          </div>
+
+          <div className="audit-item">
+            <span className="audit-label">Final Verdict:</span>
+            <span className={`audit-badge ${getBadgeClass(final_prediction)}`}>
+              {final_prediction}
+            </span>
+          </div>
+
+          {isVerdictShifted && (
+            <div className="audit-escalation-note">
+              Note: Final verdict adjusted from {text_prediction} to {final_prediction} due to URL risk signals.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 2. Message Content Analysis (rule-based) */}

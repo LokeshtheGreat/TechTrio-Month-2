@@ -2,7 +2,8 @@
 Prediction Service for PhishShift.
 
 Loads trained TF-IDF vectorizer, LinearSVC model, and review threshold artifacts.
-Combines machine learning decision scoring with URL structural analysis.
+Combines machine learning decision scoring with URL structural analysis through
+a dedicated URL-aware final decision layer.
 """
 
 import os
@@ -12,9 +13,11 @@ import numpy as np
 try:
     from .url_analyzer import analyze_all_urls
     from .content_analyzer import analyze_message_content, explain_model_words
+    from .decision_layer import evaluate_final_decision
 except ImportError:
     from url_analyzer import analyze_all_urls
     from content_analyzer import analyze_message_content, explain_model_words
+    from decision_layer import evaluate_final_decision
 
 # Module-level singletons for artifacts
 _vectorizer = None
@@ -107,6 +110,9 @@ def predict_message(message: str) -> dict:
         - url_analysis: list of dicts with structural risk inspection
         - final_prediction: "Phishing" | "Legitimate" | "Review Required"
         - reason: str explanation
+        - content_analysis: dict of rule-based pattern findings
+        - word_influences: dict of top model word attributions
+        - decision_factors: dict of factors evaluated by decision layer
     """
     if not _models_loaded:
         load_artifacts()
@@ -119,7 +125,6 @@ def predict_message(message: str) -> dict:
     decision_score = round(raw_score, 4)
 
     # 3. Determine base text prediction using review threshold
-    # The decision score is a distance from the hyperplane.
     # Scores >= threshold indicate high confidence phishing.
     # Scores < 0 indicate legitimate leaning.
     # Scores in [0, threshold) represent uncertain / borderline cases.
@@ -131,24 +136,18 @@ def predict_message(message: str) -> dict:
         text_prediction = "Review Required"
 
     # 4. Extract and structurally inspect any embedded URLs
-    extracted_urls, url_analysis, has_url_warnings = analyze_all_urls(message)
+    extracted_urls, url_analysis, _ = analyze_all_urls(message)
 
-    # 5. Determine final classification and supporting reason
-    if text_prediction == "Phishing":
-        final_prediction = "Phishing"
-        reason = "The message text was classified as phishing by the trained model."
-    elif text_prediction == "Review Required":
-        final_prediction = "Review Required"
-        reason = "The model's score falls within the configured review threshold."
-    else:
-        # text_prediction is Legitimate
-        if has_url_warnings:
-            # Conservative review behaviour triggered by URL structural risks
-            final_prediction = "Review Required"
-            reason = "The message text was classified as legitimate, but URL structural warnings were found. Additional verification is recommended."
-        else:
-            final_prediction = "Legitimate"
-            reason = "The message was classified as legitimate, and no configured URL structural warnings were found."
+    # 5. Evaluate final decision through URL-aware decision layer
+    decision = evaluate_final_decision(
+        text_prediction=text_prediction,
+        decision_score=decision_score,
+        extracted_urls=extracted_urls,
+        url_analysis=url_analysis,
+        threshold=_threshold
+    )
+    final_prediction = decision["final_prediction"]
+    reason = decision["reason"]
 
     # 6. Generate user-friendly supporting message reports
     content_analysis = analyze_message_content(message)
@@ -162,5 +161,6 @@ def predict_message(message: str) -> dict:
         "final_prediction": final_prediction,
         "reason": reason,
         "content_analysis": content_analysis,
-        "word_influences": word_influences
+        "word_influences": word_influences,
+        "decision_factors": decision.get("decision_factors")
     }

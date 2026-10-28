@@ -24,6 +24,26 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(data["status"], "healthy")
         self.assertTrue(data["model_loaded"])
 
+    def test_health_check_payload_fields(self):
+        response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertIn("status", data)
+        self.assertIn("service", data)
+        self.assertIn("version", data)
+        self.assertIn("model_loaded", data)
+        self.assertEqual(data["service"], "PhishShift Phishing Analysis API")
+
+    def test_cors_headers(self):
+        # Health check should return Access-Control-Allow-Origin
+        response = self.client.get("/health")
+        self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
+
+        # Predict options preflight
+        preflight = self.client.options("/predict")
+        self.assertEqual(preflight.status_code, 200)
+        self.assertEqual(preflight.headers.get("Access-Control-Allow-Origin"), "*")
+
     def test_predict_success(self):
         payload = {"message": "Urgent: Your account is suspended. Verify at http://192.168.1.1"}
         response = self.client.post(

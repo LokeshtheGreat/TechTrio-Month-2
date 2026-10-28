@@ -2,6 +2,8 @@ import React from 'react';
 import { Shield } from 'lucide-react';
 
 export default function Header({ backendStatus }) {
+  const { state = 'checking', message = 'Checking...' } = backendStatus || {};
+
   return (
     <header className="header">
       <div className="header-inner">
@@ -20,19 +22,17 @@ export default function Header({ backendStatus }) {
           </div>
         </div>
 
-        <div className="header-status" title="Backend ML inference service status">
+        <div
+          className="header-status"
+          role="status"
+          aria-live="polite"
+          title={`Backend API Status: ${message}`}
+        >
           <span
-            className={`status-indicator-dot ${
-              backendStatus.healthy ? 'online' : backendStatus.checking ? '' : 'degraded'
-            }`}
+            className={`status-indicator-dot ${state}`}
+            aria-hidden="true"
           />
-          <span>
-            {backendStatus.checking
-              ? 'Connecting...'
-              : backendStatus.healthy
-              ? 'Model Engine Ready'
-              : 'Backend Offline'}
-          </span>
+          <span>{message}</span>
         </div>
       </div>
     </header>

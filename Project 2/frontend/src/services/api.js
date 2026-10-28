@@ -44,18 +44,76 @@ export async function analyzeMessage(message) {
   }
 }
 
-export async function checkBackendHealth() {
+/**
+ * Checks backend health and reachability with timeout handling.
+ * Returns structured health state (checking | online | offline | degraded).
+ */
+export async function checkBackendHealth(options = {}) {
+  const { timeoutMs = 8000, externalSignal } = options;
   const endpoint = `${API_BASE_URL}/health`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timeoutId);
+      return {
+        state: 'checking',
+        healthy: false,
+        modelLoaded: false,
+        message: 'Checking...',
+      };
+    }
+    externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
   try {
-    const response = await fetch(endpoint, { method: 'GET' });
-    if (!response.ok) return { healthy: false };
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return {
+        state: 'degraded',
+        healthy: false,
+        modelLoaded: false,
+        message: 'Service Degraded',
+      };
+    }
+
     const data = await response.json();
+    const isHealthy = data && data.status === 'healthy' && Boolean(data.model_loaded);
+
+    if (isHealthy) {
+      return {
+        state: 'online',
+        healthy: true,
+        modelLoaded: true,
+        version: data.version || '1.0',
+        message: 'Online',
+      };
+    }
+
     return {
-      healthy: data.status === 'healthy',
-      modelLoaded: Boolean(data.model_loaded),
-      version: data.version || '1.0',
+      state: 'degraded',
+      healthy: false,
+      modelLoaded: Boolean(data?.model_loaded),
+      message: 'Service Degraded',
     };
   } catch {
-    return { healthy: false, modelLoaded: false };
+    clearTimeout(timeoutId);
+    return {
+      state: 'offline',
+      healthy: false,
+      modelLoaded: false,
+      message: 'Offline / Unreachable',
+    };
   }
 }
